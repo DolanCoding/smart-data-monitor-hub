@@ -1,181 +1,177 @@
-# app.py: Hauptdatei für das SDMN Flask Backend
-# Enthält grundlegende App-Konfiguration, Datenbank-Setup, ein User-Modell
-# und Implementierung der Benutzerauthentifizierung.
+# backend/app.py: Hauptdatei für das SDMN Flask Backend
+"""
+    Enthält grundlegende App-Konfiguration, Datenbank-Setup, Flask-Login
+    und Routen. Modelldefinitionen sind in models.py.
+"""
 
-from flask import Flask, render_template, url_for, redirect, request, flash # Importiere weitere Flask-Funktionen
+from flask import Flask, render_template, url_for, redirect, request, flash
 from flask_sqlalchemy import SQLAlchemy
-from flask_login import LoginManager, UserMixin, login_user, logout_user, current_user # Importiere Flask-Login
-from werkzeug.security import generate_password_hash, check_password_hash # Importiere Sicherheitsfunktionen von Werkzeug
+from flask_login import LoginManager, UserMixin, login_user, logout_user, current_user, login_required # Füge login_required hinzu
+# Keine Imports für generate_password_hash, check_password_hash, User oder Monitor hier!
+
 import os
+from dotenv import load_dotenv # Importiere load_dotenv
+
+# Imports für die Modelle aus der lokalen models.py Datei
+from .models import db, User, Monitor # Importiere db und die Modelle
 
 # basedir holt das Verzeichnis der aktuellen Datei (__file__).
-# Das ist nützlich, um Pfade relativ zur App-Datei anzugeben.
+# Dies ist nützlich, um Pfade relativ zur App-Datei anzugeben.
 basedir = os.path.abspath(os.path.dirname(__file__))
 
+# Lade Umgebungsvariablen aus der .env Datei
+load_dotenv(os.path.join(basedir, '.env'))
+
 # Erstellt die Flask-Anwendungsinstanz.
-# __name__ hilft Flask, den Root-Pfad der Anwendung zu bestimmen,
-# wichtig für das Finden von Ressourcen (z.B. Templates, statische Dateien).
+# __name__ hilft Flask, den Root-Pfad der Anwendung zu bestimmen.
 app = Flask(__name__)
 
-# Füge einen geheimen Schlüssel für die App hinzu. Wichtig für Sicherheit wie Sessions und Flask-WTF.
-# In einer echten Anwendung sollte dies aus einer .env-Datei geladen werden!
-# Für jetzt verwenden wir einen Platzhalter. Später sicherer machen!
-app.config['SECRET_KEY'] = 'Dolan' # TODO: Diesen Schlüssel aus .env laden!
+# Lade den geheimen Schlüssel aus der .env Datei
+# os.getenv('SECRET_KEY') liest den Wert der Umgebungsvariable SECRET_KEY
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY') # Jetzt aus .env geladen!
 
 """
-Datenbank-Konfiguration:
-Setzt die URI für die SQLAlchemy-Datenbank.
-'sqlite:///' gibt an, dass wir SQLite verwenden.
-os.path.join erstellt einen betriebssystemunabhängigen Pfad.
-'instance' ist ein Standardordner für Instanz-spezifische Dateien.
-'site.db' ist der Name unserer Datenbankdatei.
-Der 'instance'-Ordner wird durch .gitignore ignoriert, was wichtig ist,
-da Datenbankdateien Build-spezifisch sind und potenziell Geheimnisse enthalten können.
+    Datenbank-Konfiguration:
+    Setzt die URI für die SQLAlchemy-Datenbank.
+    'sqlite:///' gibt an, dass wir SQLite verwenden.
+    os.path.join erstellt einen betriebssystemunabhängigen Pfad.
+    'instance' ist ein Standardordner für Instanz-spezifische Dateien.
+    'site.db' ist der Name unserer Datenbankdatei.
+    Der 'instance'-Ordner wird durch .gitignore ignoriert.
 """
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'instance', 'site.db')
 
 # Deaktiviert die Verfolgung von Änderungen an SQLAlchemy-Objekten.
-# Das spart Ressourcen und wird empfohlen, wenn es nicht explizit benötigt wird.
+# Das spart Ressourcen.
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Initialisiert die SQLAlchemy-Erweiterung mit der Flask-App.
-db = SQLAlchemy(app)
+# Das db-Objekt wird hier initialisiert und dann in models.py importiert.
+db.init_app(app) # Nutze init_app nach dem Erstellen der App, falls db separat initialisiert wird
 
 # Initialisiert Flask-Login.
-# Wird zur Verwaltung von Benutzer-Sessions benötigt.
 login_manager = LoginManager()
 login_manager.init_app(app)
 
 # Stellt die Ansichtsfunktion für die Login-Seite ein.
-# Flask-Login leitet unauthentifizierte Benutzer hierhin um.
 login_manager.login_view = 'login'
-
-# Datenbankmodell: User-Tabelle
-# Erbt von db.Model (für SQLAlchemy) und UserMixin (für Flask-Login).
-class User(UserMixin, db.Model):
-    """
-    Datenbankmodell für einen Benutzer.
-    Repräsentiert die 'user' Tabelle in der SQLite-Datenbank.
-    UserMixin stellt Standardimplementierungen für Eigenschaften
-    und Methoden bereit, die von Flask-Login benötigt werden (z.B. is_authenticated).
-    """
-    # id: Primärschlüssel, automatisch generiert und hochgezählt
-    id = db.Column(db.Integer, primary_key=True)
-    # username: Textfeld (String), muss einzigartig sein, darf nicht leer sein
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    # email: Textfeld (String), muss einzigartig sein, darf nicht leer sein
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    # password_hash: Speichert den gehashten String des Passworts.
-    password_hash = db.Column(db.String(128)) # 128 für gehashte Passwörter, nicht unique
-
-    # Methode zum Setzen des Passworts (hasht es)
-    def set_password(self, password):
-        """
-        Hasht das übergebene Passwort und speichert es im password_hash Feld.
-        Verwendet generate_password_hash von Werkzeug für sicheres Hashing.
-        """
-        self.password_hash = generate_password_hash(password)
-
-    # Methode zur Überprüfung des Passworts
-    def check_password(self, password):
-        """
-        Überprüft, ob das gegebene Passwort mit dem gespeicherten Hash übereinstimmt.
-        Verwendet check_password_hash von Werkzeug.
-        """
-        return check_password_hash(self.password_hash, password)
-
-    def __repr__(self):
-        """
-        Gibt eine lesbare String-Repräsentation des User-Objekts zurück.
-        Nützlich für Debugging und das Anzeigen von Objekten in der Konsole.
-        """
-        return f'<User {self.username}>'
+login_manager.login_message_category = 'info' # Kategorie für die Standard-Flash-Nachricht
 
 # Flask-Login: user_loader Callback
-# Diese Funktion wird von Flask-Login verwendet, um einen Benutzer anhand seiner ID zu laden.
 @login_manager.user_loader
 def load_user(user_id):
     """
-    Lädt einen Benutzer anhand seiner ID.
-    Wird von Flask-Login benötigt, um den eingeloggten Benutzer zu verwalten.
-    Sollte None zurückgeben, wenn der Benutzer nicht existiert.
+        Lädt einen Benutzer anhand seiner ID.
+        Wird von Flask-Login benötigt.
     """
     if user_id is not None:
-        return db.session.get(User, int(user_id)) # Verwende session.get statt query.get für neuere SQLAlchemy-Versionen
+        return db.session.get(User, int(user_id))
     return None
 
 # Routen-Definition: Startseite
-# Der Decorator @app.route('/') ordnet die URL '/' dieser Funktion zu.
 @app.route('/')
 def index():
-    """
-    Ansichtsfunktion für die Startseite.
-    Wird aufgerufen, wenn ein Benutzer die Root-URL der Anwendung besucht.
-    Gibt eine einfache Willkommensnachricht als String zurück.
-    """
-    return "Welcome to the SDMN Backend!" # TODO: Später auf eine Landing Page im Frontend verweisen oder rendern
+    #Ansichtsfunktion für die Startseite.
+    # TODO: Später auf eine Landing Page im Frontend verweisen oder rendern
+    if current_user.is_authenticated:
+        return f'Hello, {current_user.username}! Welcome to the SDMN Backend!'
+    else:
+        return "Welcome to the SDMN Backend! Please log in or register."
 
-# TODO: Implementiere Registrierungs- und Login-Routen (später in diesem Schritt)
 
-# Beispiel für eine Registrierungsroute (noch nicht vollständig implementiert, dient als Platzhalter)
+# Beispiel für eine Registrierungsroute (mit grundlegender Logik)
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     """
-    Ansichtsfunktion für die Benutzerregistrierung.
-    Behandelt GET-Anfragen zur Anzeige des Formulars und POST-Anfragen zur Verarbeitung.
+        Ansichtsfunktion für die Benutzerregistrierung.
+        Handelt GET zur Anzeige des Formulars (TODO: Template) und POST zur Verarbeitung.
+        Erwartet 'username', 'email', 'password' im POST-Request.
+        Gibt Weiterleitung oder Fehlermeldungen zurück.
     """
-    # TODO: Formularverarbeitung mit Flask-WTF hinzufügen
+    if current_user.is_authenticated:
+        flash('You are already registered and logged in.', 'info')
+        return redirect(url_for('index'))
+
     if request.method == 'POST':
-        # TODO: Daten validieren
-        username = request.form.get('username') # Beispiel, Formularfeld vorausgesetzt
+        # Grundlegende Validierung (TODO: Erweiterte Validierung mit Flask-WTF)
+        username = request.form.get('username')
         email = request.form.get('email')
         password = request.form.get('password')
 
-        # TODO: Prüfen, ob Benutzer oder E-Mail bereits existieren
+        if not username or not email or not password:
+            flash('All fields are required.', 'danger')
+            return redirect(url_for('register')) # TODO: Formular mit Fehlern anzeigen
 
-        # Beispiel: Neuen Benutzer erstellen (noch ohne Validierung!)
+        # Prüfen, ob Benutzer oder E-Mail bereits existieren
+        existing_user = User.query.filter((User.username == username) | (User.email == email)).first()
+        if existing_user:
+            flash('Username or Email already exists.', 'danger')
+            return redirect(url_for('register')) # TODO: Formular mit Fehlern anzeigen
+
+        # Neuen Benutzer erstellen
         new_user = User(username=username, email=email)
         new_user.set_password(password) # Passwort hashen und setzen
 
-        # TODO: Benutzer zur Datenbank hinzufügen und commiten
+        try:
+            db.session.add(new_user)
+            db.session.commit()
+            flash('Registration successful! Please log in.', 'success')
+            return redirect(url_for('login'))
+        except Exception as e:
+            db.session.rollback() # Änderungen zurücknehmen im Fehlerfall
+            flash(f'Registration failed: {e}', 'danger')
+            return redirect(url_for('register')) # TODO: Formular mit Fehlern anzeigen
 
-        flash('Registration successful! Please log in.', 'success')
-        return redirect(url_for('login'))
 
-    return "<h1>Registration Page (Placeholder)</h1><p>TODO: Add registration form here.</p>" # TODO: Echtes Template rendern
+    # TODO: Echtes Registrierungs-Template für GET rendern
+    return "<h1>Registration Page (Placeholder)</h1><form method='POST'><input type='text' name='username' placeholder='Username'><br><input type='email' name='email' placeholder='Email'><br><input type='password' name='password' placeholder='Password'><br><button type='submit'>Register</button></form>"
 
-# Beispiel für eine Login-Route (noch nicht vollständig implementiert, dient als Platzhalter)
+
+# Beispiel für eine Login-Route (mit grundlegender Logik)
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     """
-    Ansichtsfunktion für den Benutzer-Login.
-    Behandelt GET-Anfragen zur Anzeige des Formulars und POST-Anfragen zur Verarbeitung.
+        Ansichtsfunktion für den Benutzer-Login.
+        Handelt GET zur Anzeige des Formulars (TODO: Template) und POST zur Verarbeitung.
+        Erwartet 'username', 'password' und optional 'remember' im POST-Request.
+        Gibt Weiterleitung oder Fehlermeldungen zurück.
     """
-    # TODO: Formularverarbeitung mit Flask-WTF hinzufügen
-    if request.method == 'POST':
-        # TODO: Daten validieren
-        username = request.form.get('username') # Beispiel, Formularfeld vorausgesetzt
-        password = request.form.get('password')
-        remember = request.form.get('remember') # Checkbox für 'Angemeldet bleiben'
+    if current_user.is_authenticated:
+        flash('You are already logged in.', 'info')
+        return redirect(url_for('index'))
 
-        # TODO: Benutzer anhand des Benutzernamens aus der Datenbank laden
-        user = None # Platzhalter: user = User.query.filter_by(username=username).first()
+    if request.method == 'POST':
+        # Grundlegende Validierung (TODO: Erweiterte Validierung mit Flask-WTF)
+        username = request.form.get('username')
+        password = request.form.get('password')
+        remember = True if request.form.get('remember') else False # Checkbox für 'Angemeldet bleiben'
+
+        if not username or not password:
+             flash('Username and password are required.', 'danger')
+             return redirect(url_for('login')) # TODO: Formular mit Fehlern anzeigen
+
+
+        # Benutzer anhand des Benutzernamens laden
+        user = User.query.filter_by(username=username).first()
 
         if user and user.check_password(password):
-            # TODO: Benutzer mit Flask-Login einloggen
+            # Benutzer mit Flask-Login einloggen
             login_user(user, remember=remember) # remember=True/False
-            # TODO: Zum nächsten geschützten Bereich weiterleiten
+            # Weiterleitung nach erfolgreichem Login (TODO: Nächsten Bereich bestimmen)
+            next_page = request.args.get('next')
             flash('Logged in successfully.', 'success')
-            return redirect(url_for('index')) # Beispiel: Weiterleitung zur Startseite
+            return redirect(next_page or url_for('index'))
 
         flash('Invalid username or password.', 'danger')
         # TODO: Formular mit Fehlern erneut anzeigen
 
-    return "<h1>Login Page (Placeholder)</h1><p>TODO: Add login form here.</p>" # TODO: Echtes Template rendern
+    # TODO: Echtes Login-Template für GET rendern
+    return "<h1>Login Page (Placeholder)</h1><form method='POST'><input type='text' name='username' placeholder='Username'><br><input type='password' name='password' placeholder='Password'><br><label><input type='checkbox' name='remember'> Remember Me</label><br><button type='submit'>Login</button></form>"
+
 
 # Beispiel für eine Logout-Route
 @app.route('/logout')
-# @login_required # TODO: Nur eingeloggte Benutzer sollten sich ausloggen können
+@login_required # Stellt sicher, dass nur eingeloggte Benutzer diese Route aufrufen können
 def logout():
     """
     Ansichtsfunktion für den Benutzer-Logout.
@@ -183,34 +179,33 @@ def logout():
     """
     logout_user()
     flash('You have been logged out.', 'info')
-    return redirect(url_for('index')) # Zum Beispiel zur Startseite oder Login-Seite weiterleiten
+    return redirect(url_for('index')) # Zum Beispiel zur Startseite weiterleiten
+
+
+# Beispiel für eine geschützte Route (nur für eingeloggte Benutzer zugänglich)
+@app.route('/dashboard')
+@login_required # Dieser Decorator schützt die Route
+def dashboard():
+    """
+    Beispiel für eine geschützte Route.
+    Nur eingeloggte Benutzer können diese Seite sehen.
+    """
+    return f"<h1>Welcome to the Dashboard, {current_user.username}!</h1><p>This is a protected area.</p><p><a href='{url_for('logout')}'>Logout</a></p>"
 
 
 # Startpunkt der Anwendung:
-# Dieser Block wird nur ausgeführt, wenn die Datei 'app.py' direkt
-# ausgeführt wird (z.B. mit 'python app.py'), nicht wenn sie als Modul importiert wird.
 if __name__ == '__main__':
     """
     Datenbanktabellen erstellen im Anwendungs-Kontext:
-    app.app_context() erstellt einen temporären Kontext, in dem Flask-Erweiterungen
-    wie SQLAlchemy korrekt arbeiten können.
-    db.create_all() liest alle in der App definierten db.Model-Klassen
-    und erstellt entsprechende Tabellen in der Datenbank, falls sie noch nicht existieren.
-    Da wir das User-Modell erweitert haben (password_hash), muss die Datenbank
-    aktualisiert werden. Da wir noch keine Migrationen nutzen, kann es notwendig sein,
-    die alte site.db zu löschen, damit create_all die neue Spalte hinzufügt.
-    In einer Produktionsanwendung oder bei komplexeren Datenbankänderungen
-    würde man hierfür üblicherweise Flask-Migrate verwenden.
+    Erstellt alle in models.py definierten Tabellen, falls sie noch nicht existieren.
+    Möglicherweise müssen Sie site.db löschen, wenn Sie das Schema manuell ändern
+    und keine Migrationen verwenden.
     """
     with app.app_context():
+        # db.create_all() liest nun die Modelle aus models.py
         db.create_all()
 
     """
-    Flask Entwicklungsserver starten:
-    app.run() startet den lokalen Webserver.
-    debug=True:
-    - Ermöglicht das Debugging (zeigt detaillierte Fehlermeldungen im Browser/Konsole).
-    - Aktiviert den automatischen Neuladen des Servers bei Code-Änderungen.
-    Sollte in Produktion IMMER auf False gesetzt werden!
+    Flask Entwicklungsserver starten.
     """
     app.run(debug=True)
