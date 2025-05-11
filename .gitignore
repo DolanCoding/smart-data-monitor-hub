@@ -1,0 +1,19 @@
+# Python
+*.pyc
+__pycache__/
+venv/ # Wichtig: die virtuelle Umgebung NICHT committen
+.env # Entscheidend: Umgebungsvariablen NICHT committen
+
+# Frontend (an Framework anpassen, Beispiele für Node.js)
+node_modules/
+dist/ # Build-Output
+
+# n8n (falls Konfiguration lokal gespeichert wird, anpassen)
+.n8n/
+
+# Datenbank (für SQLite)
+instance/*.db
+
+# IDE spezifische Dateien (optional, aber empfohlen)
+.vscode/
+.idea/
