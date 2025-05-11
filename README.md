@@ -1,2 +1,2 @@
-# smart-data-monitor-hub
-Entwicklung einer Webanwendung, die Daten abruft, diese über ein Python-Backend mithilfe externer AI-APIs analysiert und intelligente Benachrichtigungen über n8n Workflows versendet. Das Projekt wird als professionelles Portfolio-Stück konzipiert und präsentiert.
+# Smart Data Monitor & Notification Hub (SDMN)
+Dieses Projekt ist eine Webanwendung, die darauf ausgelegt ist, Daten zu überwachen, mithilfe von Python (Flask) und externen AI-APIs intelligente Analysen durchzuführen und über n8n Workflows automatisierte Benachrichtigungen zu versenden. Die Daten werden in einer SQLite-Datenbank gespeichert. Das Projekt dient als Demonstrationsstück für ein Entwicklungsportfolio und zeigt die Integration verschiedener Technologien zur Lösung eines praktischen Problems."
