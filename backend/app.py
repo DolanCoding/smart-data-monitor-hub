@@ -1,16 +1,17 @@
 # backend/app.py: Hauptdatei für das SDMN Flask Backend
-"""
-    Enthält grundlegende App-Konfiguration, Datenbank-Setup, Flask-Login
-    und Routen. Modelldefinitionen sind in models.py.
-"""
+# Enthält grundlegende App-Konfiguration, Datenbank-Setup, Flask-Login
+# und Routen für die Authentifizierung und Monitor-API.
+# Modelldefinitionen sind in models.py.
 
-from flask import Flask, render_template, url_for, redirect, request, flash
+from flask import Flask, render_template, url_for, redirect, request, flash, jsonify
 from flask_sqlalchemy import SQLAlchemy
-from flask_login import LoginManager, UserMixin, login_user, logout_user, current_user, login_required # Füge login_required hinzu
-# Keine Imports für generate_password_hash, check_password_hash, User oder Monitor hier!
+from flask_login import LoginManager, UserMixin, login_user, logout_user, current_user, login_required
+from sqlalchemy.exc import IntegrityError
+from datetime import datetime # Stelle sicher, dass datetime importiert ist
+
 
 import os
-from dotenv import load_dotenv # Importiere load_dotenv
+from dotenv import load_dotenv
 
 # Imports für die Modelle aus der lokalen models.py Datei
 from .models import db, User, Monitor # Importiere db und die Modelle
@@ -31,13 +32,13 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY') # Jetzt aus .env geladen!
 
 """
-    Datenbank-Konfiguration:
-    Setzt die URI für die SQLAlchemy-Datenbank.
-    'sqlite:///' gibt an, dass wir SQLite verwenden.
-    os.path.join erstellt einen betriebssystemunabhängigen Pfad.
-    'instance' ist ein Standardordner für Instanz-spezifische Dateien.
-    'site.db' ist der Name unserer Datenbankdatei.
-    Der 'instance'-Ordner wird durch .gitignore ignoriert.
+Datenbank-Konfiguration:
+Setzt die URI für die SQLAlchemy-Datenbank.
+'sqlite:///' gibt an, dass wir SQLite verwenden.
+os.path.join erstellt einen betriebssystemunabhängigen Pfad.
+'instance' ist ein Standardordner für Instanz-spezifische Dateien.
+'site.db' ist der Name unserer Datenbankdatei.
+Der 'instance'-Ordner wird durch .gitignore ignoriert.
 """
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'instance', 'site.db')
 
@@ -61,8 +62,8 @@ login_manager.login_message_category = 'info' # Kategorie für die Standard-Flas
 @login_manager.user_loader
 def load_user(user_id):
     """
-        Lädt einen Benutzer anhand seiner ID.
-        Wird von Flask-Login benötigt.
+    Lädt einen Benutzer anhand seiner ID.
+    Wird von Flask-Login benötigt.
     """
     if user_id is not None:
         return db.session.get(User, int(user_id))
@@ -71,22 +72,23 @@ def load_user(user_id):
 # Routen-Definition: Startseite
 @app.route('/')
 def index():
-    #Ansichtsfunktion für die Startseite.
+    """
+    Ansichtsfunktion für die Startseite.
+    """
     # TODO: Später auf eine Landing Page im Frontend verweisen oder rendern
     if current_user.is_authenticated:
         return f'Hello, {current_user.username}! Welcome to the SDMN Backend!'
     else:
         return "Welcome to the SDMN Backend! Please log in or register."
 
-
 # Beispiel für eine Registrierungsroute (mit grundlegender Logik)
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     """
-        Ansichtsfunktion für die Benutzerregistrierung.
-        Handelt GET zur Anzeige des Formulars (TODO: Template) und POST zur Verarbeitung.
-        Erwartet 'username', 'email', 'password' im POST-Request.
-        Gibt Weiterleitung oder Fehlermeldungen zurück.
+    Ansichtsfunktion für die Benutzerregistrierung.
+    Handelt GET zur Anzeige des Formulars (TODO: Template) und POST zur Verarbeitung.
+    Erwartet 'username', 'email', 'password' im POST-Request.
+    Gibt Weiterleitung oder Fehlermeldungen zurück.
     """
     if current_user.is_authenticated:
         flash('You are already registered and logged in.', 'info')
@@ -117,6 +119,10 @@ def register():
             db.session.commit()
             flash('Registration successful! Please log in.', 'success')
             return redirect(url_for('login'))
+        except IntegrityError:
+             db.session.rollback()
+             flash('Username or Email already exists.', 'danger') # Eindeutigkeitsfehler abfangen
+             return redirect(url_for('register'))
         except Exception as e:
             db.session.rollback() # Änderungen zurücknehmen im Fehlerfall
             flash(f'Registration failed: {e}', 'danger')
@@ -131,10 +137,10 @@ def register():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     """
-        Ansichtsfunktion für den Benutzer-Login.
-        Handelt GET zur Anzeige des Formulars (TODO: Template) und POST zur Verarbeitung.
-        Erwartet 'username', 'password' und optional 'remember' im POST-Request.
-        Gibt Weiterleitung oder Fehlermeldungen zurück.
+    Ansichtsfunktion für den Benutzer-Login.
+    Handelt GET zur Anzeige des Formulars (TODO: Template) und POST zur Verarbeitung.
+    Erwartet 'username', 'password' und optional 'remember' im POST-Request.
+    Gibt Weiterleitung oder Fehlermeldungen zurück.
     """
     if current_user.is_authenticated:
         flash('You are already logged in.', 'info')
@@ -193,7 +199,187 @@ def dashboard():
     return f"<h1>Welcome to the Dashboard, {current_user.username}!</h1><p>This is a protected area.</p><p><a href='{url_for('logout')}'>Logout</a></p>"
 
 
+# API Routen für Monitor CRUD (Create, Read, Update, Delete)
+
+@app.route('/api/monitors', methods=['GET', 'POST'])
+@login_required # Nur eingeloggte Benutzer können auf diese Route zugreifen
+def manage_monitors():
+    """
+        API Endpunkt zur Verwaltung von Monitoren (Liste abrufen, neuen Monitor erstellen).
+        GET: Ruft alle Monitore des aktuell eingeloggten Benutzers ab.
+        POST: Erstellt einen neuen Monitor für den aktuell eingeloggten Benutzer.
+        Erwartet JSON-Daten im POST-Request: {"name": "...", "data_source_url": "...", "analysis_type": "..."}
+        Gibt eine Liste von Monitoren (GET) oder den neu erstellten Monitor (POST) als JSON zurück.
+    """
+    if request.method == 'GET':
+        # Hole alle Monitore, die dem aktuellen Benutzer gehören, über die Relationship
+        monitors = current_user.monitors
+
+        # Bereite die Daten für die JSON-Antwort vor
+        monitors_data = []
+        for monitor in monitors:
+            monitors_data.append({
+                'id': monitor.id,
+                'name': monitor.name,
+                'data_source_url': monitor.data_source_url,
+                'analysis_type': monitor.analysis_type,
+                'creation_date': monitor.creation_date.isoformat() if monitor.creation_date else None, # Datum als ISO-Format String
+                'last_run': monitor.last_run.isoformat() if monitor.last_run else None,
+                'is_active': monitor.is_active,
+                # 'user_id': monitor.user_id # Nicht unbedingt nötig in der Antwort, da es immer der eingeloggte Benutzer ist
+            })
+
+        # Gib die Liste der Monitore als JSON-Antwort zurück
+        return jsonify(monitors_data)
+
+    elif request.method == 'POST':
+        # Erwarte JSON-Daten vom Frontend
+        data = request.get_json()
+
+        # Grundlegende Validierung der JSON-Daten
+        if not data or not data.get('name') or not data.get('data_source_url') or not data.get('analysis_type'):
+            # Gib eine Fehlermeldung und Statuscode 400 Bad Request zurück
+            return jsonify({"error": "Missing required monitor data (name, data_source_url, analysis_type)"}), 400
+
+        name = data.get('name')
+        data_source_url = data.get('data_source_url')
+        analysis_type = data.get('analysis_type')
+
+        # TODO: Erweiterte Validierung (z.B. URL-Format, erlaubte analysis_type Werte)
+
+        # Erstelle ein neues Monitor-Objekt
+        new_monitor = Monitor(
+            name=name,
+            data_source_url=data_source_url,
+            analysis_type=analysis_type,
+            user_id=current_user.id # Weise den Monitor dem aktuell eingeloggten Benutzer zu
+            # creation_date und is_active haben Standardwerte im Modell
+        )
+
+        try:
+            # Füge den neuen Monitor zur Datenbank-Session hinzu
+            db.session.add(new_monitor)
+            # Speichere die Änderungen
+            db.session.commit()
+
+            # Gib den neu erstellten Monitor als JSON-Antwort zurück (inklusive ID und Standardwerten)
+            return jsonify({
+                'id': new_monitor.id,
+                'name': new_monitor.name,
+                'data_source_url': new_monitor.data_source_url,
+                'analysis_type': new_monitor.analysis_type,
+                'creation_date': new_monitor.creation_date.isoformat() if new_monitor.creation_date else None,
+                'last_run': new_monitor.last_run.isoformat() if new_monitor.last_run else None,
+                'is_active': new_monitor.is_active,
+                'user_id': new_monitor.user_id
+            }), 201 # Statuscode 201 Created zurückgeben
+
+        except IntegrityError:
+             # TODO: Hier spezifischere Fehlerbehandlung falls nötig (z.B. Name einzigartig?)
+             db.session.rollback()
+             return jsonify({"error": "Database integrity error."}), 500 # Interner Serverfehler
+
+        except Exception as e:
+            # Allgemeine Fehlerbehandlung
+            db.session.rollback()
+            # Logge den Fehler für Debugging
+            app.logger.error(f"Error creating monitor: {e}")
+            return jsonify({"error": "Failed to create monitor due to internal error."}), 500 # Interner Serverfehler
+
+
+@app.route('/api/monitors/<int:monitor_id>', methods=['GET', 'PUT', 'DELETE'])
+@login_required # Nur eingeloggte Benutzer können auf diese Routen zugreifen
+def manage_single_monitor(monitor_id):
+    """
+    API Endpunkt zur Verwaltung eines einzelnen Monitors anhand seiner ID.
+    Stellt sicher, dass der Monitor dem aktuell eingeloggten Benutzer gehört.
+    GET: Ruft einen spezifischen Monitor ab.
+    PUT: Aktualisiert einen spezifischen Monitor. Erwartet JSON-Daten im PUT-Request.
+    DELETE: Löscht einen spezifischen Monitor.
+    Erwartet Monitor-ID als Teil der URL.
+    Gibt den Monitor (GET/PUT) oder Erfolgsmeldung (DELETE) als JSON zurück.
+    """
+    # Suche den Monitor anhand der ID UND stelle sicher, dass er dem aktuell eingeloggten Benutzer gehört
+    monitor = Monitor.query.filter_by(id=monitor_id, user_id=current_user.id).first()
+
+    # Wenn der Monitor nicht gefunden wird ODER er nicht dem aktuellen Benutzer gehört, gib 404 zurück
+    if not monitor:
+        return jsonify({"error": "Monitor not found or does not belong to the current user"}), 404
+
+    if request.method == 'GET':
+        # Gib die Daten des gefundenen Monitors als JSON zurück
+        return jsonify({
+            'id': monitor.id,
+            'name': monitor.name,
+            'data_source_url': monitor.data_source_url,
+            'analysis_type': monitor.analysis_type,
+            'creation_date': monitor.creation_date.isoformat() if monitor.creation_date else None,
+            'last_run': monitor.last_run.isoformat() if monitor.last_run else None,
+            'is_active': monitor.is_active,
+            'user_id': monitor.user_id
+        })
+
+    elif request.method == 'PUT':
+        # Erwarte JSON-Daten für die Aktualisierung
+        data = request.get_json()
+
+        # Grundlegende Validierung der Update-Daten
+        if not data:
+             return jsonify({"error": "No update data provided"}), 400
+
+        # Aktualisiere die Felder des Monitors, wenn Daten im Request enthalten sind
+        if 'name' in data:
+            monitor.name = data['name']
+        if 'data_source_url' in data:
+            monitor.data_source_url = data['data_source_url']
+        if 'analysis_type' in data:
+            monitor.analysis_type = data['analysis_type']
+        if 'is_active' in data:
+            # Stelle sicher, dass is_active ein Boolean ist
+            if isinstance(data['is_active'], bool):
+                monitor.is_active = data['is_active']
+            else:
+                return jsonify({"error": "is_active must be a boolean value"}), 400
+        # TODO: Erweiterte Validierung der Update-Daten
+
+        try:
+            # Speichere die Änderungen
+            db.session.commit()
+            # Gib den aktualisierten Monitor als JSON zurück
+            return jsonify({
+                'id': monitor.id,
+                'name': monitor.name,
+                'data_source_url': monitor.data_source_url,
+                'analysis_type': monitor.analysis_type,
+                'creation_date': monitor.creation_date.isoformat() if monitor.creation_date else None,
+                'last_run': monitor.last_run.isoformat() if monitor.last_run else None,
+                'is_active': monitor.is_active,
+                'user_id': monitor.user_id
+            })
+
+        except Exception as e:
+            db.session.rollback()
+            app.logger.error(f"Error updating monitor {monitor_id}: {e}")
+            return jsonify({"error": "Failed to update monitor due to internal error."}), 500
+
+    elif request.method == 'DELETE':
+        try:
+            # Lösche den Monitor aus der Datenbank
+            db.session.delete(monitor)
+            # Speichere die Änderung
+            db.session.commit()
+            # Gib eine Erfolgsmeldung zurück
+            return jsonify({"message": f"Monitor {monitor_id} deleted successfully."}), 200 # 200 OK oder 204 No Content
+
+        except Exception as e:
+            db.session.rollback()
+            app.logger.error(f"Error deleting monitor {monitor_id}: {e}")
+            return jsonify({"error": "Failed to delete monitor due to internal error."}), 500
+
+
 # Startpunkt der Anwendung:
+# Dieser Block wird nur ausgeführt, wenn die Datei 'app.py' direkt
+# ausgeführt wird (z.B. mit 'python app.py'), nicht wenn sie als Modul importiert wird.
 if __name__ == '__main__':
     """
     Datenbanktabellen erstellen im Anwendungs-Kontext:
