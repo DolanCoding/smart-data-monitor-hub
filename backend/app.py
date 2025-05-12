@@ -1,17 +1,18 @@
 # backend/app.py: Hauptdatei für das SDMN Flask Backend
 # Enthält grundlegende App-Konfiguration, Datenbank-Setup, Flask-Login
 # und Routen für die Authentifizierung und Monitor-API.
-# Modelldefinitionen sind in models.py.
+# Enthält Logik zum Abrufen und initialen Verarbeiten von Daten.
 
 from flask import Flask, render_template, url_for, redirect, request, flash, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, current_user, login_required
 from sqlalchemy.exc import IntegrityError
-from datetime import datetime # Stelle sicher, dass datetime importiert ist
-
+from datetime import datetime
 
 import os
 from dotenv import load_dotenv
+import requests
+from bs4 import BeautifulSoup
 
 # Imports für die Modelle aus der lokalen models.py Datei
 from .models import db, User, Monitor # Importiere db und die Modelle
@@ -205,11 +206,11 @@ def dashboard():
 @login_required # Nur eingeloggte Benutzer können auf diese Route zugreifen
 def manage_monitors():
     """
-        API Endpunkt zur Verwaltung von Monitoren (Liste abrufen, neuen Monitor erstellen).
-        GET: Ruft alle Monitore des aktuell eingeloggten Benutzers ab.
-        POST: Erstellt einen neuen Monitor für den aktuell eingeloggten Benutzer.
-        Erwartet JSON-Daten im POST-Request: {"name": "...", "data_source_url": "...", "analysis_type": "..."}
-        Gibt eine Liste von Monitoren (GET) oder den neu erstellten Monitor (POST) als JSON zurück.
+    API Endpunkt zur Verwaltung von Monitoren (Liste abrufen, neuen Monitor erstellen).
+    GET: Ruft alle Monitore des aktuell eingeloggten Benutzers ab.
+    POST: Erstellt einen neuen Monitor für den aktuell eingeloggten Benutzer.
+    Erwartet JSON-Daten im POST-Request: {"name": "...", "data_source_url": "...", "analysis_type": "..."}
+    Gibt eine Liste von Monitoren (GET) oder den neu erstellten Monitor (POST) als JSON zurück.
     """
     if request.method == 'GET':
         # Hole alle Monitore, die dem aktuellen Benutzer gehören, über die Relationship
@@ -375,6 +376,89 @@ def manage_single_monitor(monitor_id):
             db.session.rollback()
             app.logger.error(f"Error deleting monitor {monitor_id}: {e}")
             return jsonify({"error": "Failed to delete monitor due to internal error."}), 500
+
+
+# --- Logik für Datenabruf und initiale Verarbeitung (Schritt 2.3) ---
+
+def fetch_data_from_url(url):
+    """
+    Holt Daten von einer gegebenen URL.
+    Beinhaltet grundlegende Fehlerbehandlung für den HTTP-Abruf.
+    Gibt den Text der Antwort zurück oder None bei Fehler.
+    """
+    try:
+        response = requests.get(url)
+        response.raise_for_status() # Löst HTTPError für schlechte Antworten (4xx oder 5xx) aus
+        return response.text # Gibt den Inhalt der Antwort als String zurück
+    except requests.exceptions.RequestException as e:
+        # Fehler beim Abrufen der URL (Netzwerkprobleme, ungültige URL, Timeout etc.)
+        app.logger.error(f"Error fetching data from {url}: {e}")
+        return None # Gib None zurück, um anzuzeigen, dass der Abruf fehlgeschlagen ist
+
+
+def extract_text_from_html(html_content):
+    """
+    Extrahiert Text aus HTML-Inhalt.
+    Gibt den bereinigten Text zurück.
+    """
+    if not html_content:
+        return None
+    try:
+        soup = BeautifulSoup(html_content, 'html.parser')
+        # Entferne Skripte und Style-Elemente
+        for script in soup(["script", "style"]):
+            script.extract()
+        text = soup.get_text()
+        # Bereinige Text (entferne überflüssige Leerzeichen und Zeilenumbrüche)
+        lines = (line.strip() for line in text.splitlines())
+        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+        text = '\n'.join(chunk for chunk in chunks if chunk)
+        return text
+    except Exception as e:
+        app.logger.error(f"Error extracting text from HTML: {e}")
+        return None
+
+
+def process_monitor_data(monitor: Monitor): #! Neue Funktion beginnt hier
+    """ #! Neuer Docstring
+    Verarbeitet Daten für einen gegebenen Monitor basierend auf seiner Konfiguration. #! Neuer Docstring
+    Holt Daten von der data_source_url und führt initiale Verarbeitung durch (z.B. Text-Extraktion). #! Neuer Docstring
+    Gibt die verarbeiteten Daten (z.B. reiner Text) zurück oder None bei Fehlern. #! Neuer Docstring
+    """ #! Ende neuer Docstring
+    if not monitor or not monitor.data_source_url: #! Neue Zeile
+        app.logger.warning("process_monitor_data called with invalid monitor or missing URL.") #! Neue Zeile
+        return None #! Neue Zeile
+
+    raw_data = fetch_data_from_url(monitor.data_source_url) #! Neue Zeile
+    if raw_data is None: #! Neue Zeile
+        # fetch_data_from_url hat den Fehler bereits geloggt #! Neue Zeile
+        return None #! Neue Zeile
+
+    processed_data = None #! Neue Zeile
+
+    # Beispiel für initiale Verarbeitung basierend auf analysis_type #! Neue Zeile
+    if monitor.analysis_type in ['sentiment', 'keywords']: #! Neue Zeile
+        # Für Textanalysen extrahieren wir Text aus HTML #! Neue Zeile
+        processed_data = extract_text_from_html(raw_data) #! Neue Zeile
+        if processed_data is None: #! Neue Zeile
+             app.logger.error(f"Failed to extract text for monitor {monitor.id} from {monitor.data_source_url}") #! Neue Zeile
+             return None #! Neue Zeile
+        # TODO: Weitere Logik für andere Datenformate (z.B. JSON direkt parsen) #! Neuer TODO
+
+    # TODO: Weitere 'analysis_type's und deren spezifische initiale Verarbeitung #! Neuer TODO
+
+    # Wenn kein spezifischer Verarbeitungsschritt definiert ist, geben wir die Rohdaten zurück (oder None, je nach Design) #! Neue Zeile
+    if processed_data is None: #! Neue Zeile
+         # Für analysis_types, die keine initiale Verarbeitung benötigen (z.B. API, die direkt saubere Daten liefert) #! Neue Zeile
+         # Oder als Fallback, wenn der analysis_type unbekannt ist #! Neue Zeile
+         processed_data = raw_data #! Neue Zeile
+
+
+    return processed_data #! Neue Zeile
+#! Ende neue Funktion
+
+
+# TODO: Funktion, die fetch_data_from_url und extract_text_from_html basierend auf Monitor-Konfiguration aufruft #! Dieser TODO-Kommentar kann nun gelöscht werden, da process_monitor_data diese Rolle übernimmt.
 
 
 # Startpunkt der Anwendung:
