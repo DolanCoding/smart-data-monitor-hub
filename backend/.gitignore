@@ -19,5 +19,5 @@ instance/*.db
 .idea/
 
 # Ignore environment variables file
-backend/.env #! Füge diese Zeile hinzu
+backend/.env
 .env
