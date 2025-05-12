@@ -2,12 +2,13 @@
 # Enthält Routen für CRUD-Operationen auf Monitoren und die Datenverarbeitungslogik.
 
 from flask import Blueprint, request, jsonify #! Importiere Flask-Funktionen
-from flask_login import login_required, current_user #! Importiere Flask-Login Funktionen
+from flask_login import login_required, current_user # Importiere Flask-Login Funktionen (werden hier nicht für den Trigger-Endpunkt benötigt, aber für CRUD)
 from sqlalchemy.exc import IntegrityError #! Importiere IntegrityError
 from datetime import datetime #! Importiere datetime
 
 import requests #! Importiere requests
 from bs4 import BeautifulSoup #! Importiere BeautifulSoup
+import os #! Importiere os für Umgebungsvariablen
 
 # Importiere das db-Objekt und die Modelle aus den übergeordneten Paketen
 # Die Punkte (..) navigieren ein Verzeichnis hoch (von 'routes' nach 'backend')
@@ -21,8 +22,9 @@ monitor_api_bp = Blueprint('monitor_api', __name__, url_prefix='/api') #! Defini
 
 
 # --- API Routen für Monitor CRUD (Create, Read, Update, Delete) ---
+# (Diese Routen bleiben hier, wurden aber im vorherigen Schritt verschoben)
 
-@monitor_api_bp.route('/monitors', methods=['GET', 'POST']) #! Route auf Blueprint (ohne /api, da Präfix gesetzt)
+@monitor_api_bp.route('/monitors', methods=['GET', 'POST'])
 @login_required # Nur eingeloggte Benutzer können auf diese Route zugreifen
 def manage_monitors():
     """
@@ -103,12 +105,12 @@ def manage_monitors():
         except Exception as e:
             # Allgemeine Fehlerbehandlung
             db.session.rollback()
-            # Logge den Fehler für Debugging (TODO: app.logger muss noch verfügbar gemacht werden oder hier anders loggen) #! TODO anpassen wegen logging
+            # TODO: app.logger muss noch verfügbar gemacht werden oder hier anders loggen
             # app.logger.error(f"Error creating monitor: {e}")
             return jsonify({"error": "Failed to create monitor due to internal error."}), 500 # Interner Serverfehler
 
 
-@monitor_api_bp.route('/monitors/<int:monitor_id>', methods=['GET', 'PUT', 'DELETE']) #! Route auf Blueprint (ohne /api)
+@monitor_api_bp.route('/monitors/<int:monitor_id>', methods=['GET', 'PUT', 'DELETE'])
 @login_required # Nur eingeloggte Benutzer können auf diese Routen zugreifen
 def manage_single_monitor(monitor_id):
     """
@@ -180,7 +182,7 @@ def manage_single_monitor(monitor_id):
 
         except Exception as e:
             db.session.rollback()
-            # TODO: app.logger muss noch verfügbar gemacht werden oder hier anders loggen #! TODO anpassen wegen logging
+            # TODO: app.logger muss noch verfügbar gemacht werden oder hier anders loggen
             # app.logger.error(f"Error updating monitor {monitor_id}: {e}")
             return jsonify({"error": "Failed to update monitor due to internal error."}), 500
 
@@ -195,7 +197,7 @@ def manage_single_monitor(monitor_id):
 
         except Exception as e:
             db.session.rollback()
-            # TODO: app.logger muss noch verfügbar gemacht werden oder hier anders loggen #! TODO anpassen wegen logging
+            # TODO: app.logger muss noch verfügbar gemacht werden oder hier anders loggen
             # app.logger.error(f"Error deleting monitor {monitor_id}: {e}")
             return jsonify({"error": "Failed to delete monitor due to internal error."}), 500
 
@@ -204,85 +206,173 @@ def manage_single_monitor(monitor_id):
 # Diese Funktionen werden hier platziert, da sie eng mit der API interagieren werden,
 # insbesondere mit einem zukünftigen Endpunkt, der die Verarbeitung anstößt.
 
-def fetch_data_from_url(url): #! Funktion verschoben
-    """ #! Docstring verschoben
-    Holt Daten von einer gegebenen URL. #! Docstring verschoben
-    Beinhaltet grundlegende Fehlerbehandlung für den HTTP-Abruf. #! Docstring verschoben
-    Gibt den Text der Antwort zurück oder None bei Fehler. #! Docstring verschoben
-    """ #! Docstring verschoben
-    try: #! Zeile verschoben
-        response = requests.get(url) #! Zeile verschoben
-        response.raise_for_status() # Löst HTTPError für schlechte Antworten (4xx oder 5xx) aus #! Zeile verschoben
-        return response.text # Gibt den Inhalt der Antwort als String zurück #! Zeile verschoben
-    except requests.exceptions.RequestException as e: #! Zeile verschoben
-        # Fehler beim Abrufen der URL (Netzwerkprobleme, ungültige URL, Timeout etc.) #! Zeile verschoben
-        # TODO: app.logger muss noch verfügbar gemacht werden oder hier anders loggen #! TODO anpassen wegen logging
+def fetch_data_from_url(url):
+    """
+    Holt Daten von einer gegebenen URL.
+    Beinhaltet grundlegende Fehlerbehandlung für den HTTP-Abruf.
+    Gibt den Text der Antwort zurück oder None bei Fehler.
+    """
+    try:
+        response = requests.get(url)
+        response.raise_for_status() # Löst HTTPError für schlechte Antworten (4xx oder 5xx) aus
+        return response.text # Gibt den Inhalt der Antwort als String zurück
+    except requests.exceptions.RequestException as e:
+        # Fehler beim Abrufen der URL (Netzwerkprobleme, ungültige URL, Timeout etc.)
+        # TODO: app.logger muss noch verfügbar gemacht werden oder hier anders loggen
         # app.logger.error(f"Error fetching data from {url}: {e}")
-        return None # Gib None zurück, um anzuzeigen, dass der Abruf fehlgeschlagen ist #! Zeile verschoben
+        return None # Gib None zurück, um anzuzeigen, dass der Abruf fehlgeschlagen ist
 
 
-def extract_text_from_html(html_content): #! Funktion verschoben
-    """ #! Docstring verschoben
-    Extrahiert Text aus HTML-Inhalt. #! Docstring verschoben
-    Gibt den bereinigten Text zurück. #! Docstring verschoben
-    """ #! Docstring verschoben
-    if not html_content: #! Zeile verschoben
-        return None #! Zeile verschoben
-    try: #! Zeile verschoben
-        soup = BeautifulSoup(html_content, 'html.parser') #! Zeile verschoben
-        # Entferne Skripte und Style-Elemente #! Zeile verschoben
-        for script in soup(["script", "style"]): #! Zeile verschoben
-            script.extract() #! Zeile verschoben
-        text = soup.get_text() #! Zeile verschoben
-        # Bereinige Text (entferne überflüssige Leerzeichen und Zeilenumbrüche) #! Zeile verschoben
-        lines = (line.strip() for line in text.splitlines()) #! Zeile verschoben
-        chunks = (phrase.strip() for line in lines for phrase in line.split("  ")) #! Zeile verschoben
-        text = '\n'.join(chunk for chunk in chunks if chunk) #! Zeile verschoben
-        return text #! Zeile verschoben
-    except Exception as e: #! Zeile verschoben
-        # TODO: app.logger muss noch verfügbar gemacht werden oder hier anders loggen #! TODO anpassen wegen logging
+def extract_text_from_html(html_content):
+    """
+    Extrahiert Text aus HTML-Inhalt.
+    Gibt den bereinigten Text zurück.
+    """
+    if not html_content:
+        return None
+    try:
+        soup = BeautifulSoup(html_content, 'html.parser')
+        # Entferne Skripte und Style-Elemente
+        for script in soup(["script", "style"]):
+            script.extract()
+        text = soup.get_text()
+        # Bereinige Text (entferne überflüssige Leerzeichen und Zeilenumbrüche)
+        lines = (line.strip() for line in text.splitlines())
+        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+        text = '\n'.join(chunk for chunk in chunks if chunk)
+        return text
+    except Exception as e:
+        # TODO: app.logger muss noch verfügbar gemacht werden oder hier anders loggen
         # app.logger.error(f"Error extracting text from HTML: {e}")
-        return None #! Zeile verschoben
+        return None
 
 
-def process_monitor_data(monitor: Monitor): #! Funktion verschoben
-    """ #! Docstring verschoben
-    Verarbeitet Daten für einen gegebenen Monitor basierend auf seiner Konfiguration. #! Docstring verschoben
-    Holt Daten von der data_source_url und führt initiale Verarbeitung durch (z.B. Text-Extraktion). #! Docstring verschoben
-    Gibt die verarbeiteten Daten (z.B. reiner Text) zurück oder None bei Fehlern. #! Docstring verschoben
-    """ #! Docstring verschoben
-    if not monitor or not monitor.data_source_url: #! Zeile verschoben
-        # TODO: app.logger muss noch verfügbar gemacht werden oder hier anders loggen #! TODO anpassen wegen logging
+def process_monitor_data(monitor: Monitor):
+    """
+    Verarbeitet Daten für einen gegebenen Monitor basierend auf seiner Konfiguration.
+    Holt Daten von der data_source_url und führt initiale Verarbeitung durch (z.B. Text-Extraktion).
+    Gibt die verarbeiteten Daten (z.B. reiner Text) zurück oder None bei Fehlern.
+    """
+    if not monitor or not monitor.data_source_url:
+        # TODO: app.logger muss noch verfügbar gemacht werden oder hier anders loggen
         # app.logger.warning("process_monitor_data called with invalid monitor or missing URL.")
-        return None #! Zeile verschoben
+        return None
 
-    raw_data = fetch_data_from_url(monitor.data_source_url) #! Zeile verschoben
-    if raw_data is None: #! Zeile verschoben
-        # fetch_data_from_url hat den Fehler bereits geloggt (TODO: Anpassung wegen Logging) #! Zeile verschoben
-        return None #! Zeile verschoben
+    raw_data = fetch_data_from_url(monitor.data_source_url)
+    if raw_data is None:
+        # fetch_data_from_url hat den Fehler bereits geloggt (TODO: Anpassung wegen Logging)
+        return None
 
-    processed_data = None #! Zeile verschoben
+    processed_data = None
 
-    # Beispiel für initiale Verarbeitung basierend auf analysis_type #! Zeile verschoben
-    if monitor.analysis_type in ['sentiment', 'keywords']: #! Zeile verschoben
-        # Für Textanalysen extrahieren wir Text aus HTML #! Zeile verschoben
-        processed_data = extract_text_from_html(raw_data) #! Zeile verschoben
-        if processed_data is None: #! Zeile verschoben
-             # TODO: app.logger muss noch verfügbar gemacht werden oder hier anders loggen #! TODO anpassen wegen logging
+    # Beispiel für initiale Verarbeitung basierend auf analysis_type
+    if monitor.analysis_type in ['sentiment', 'keywords']:
+        # Für Textanalysen extrahieren wir Text aus HTML
+        processed_data = extract_text_from_html(raw_data)
+        if processed_data is None:
+             # TODO: app.logger muss noch verfügbar gemacht werden oder hier anders loggen
              # app.logger.error(f"Failed to extract text for monitor {monitor.id} from {monitor.data_source_url}")
-             return None #! Zeile verschoben
-        # TODO: Weitere Logik für andere Datenformate (z.B. JSON direkt parsen) #! TODO bleibt
+             return None
+        # TODO: Weitere Logik für andere Datenformate (z.B. JSON direkt parsen)
 
-    # TODO: Weitere 'analysis_type's und deren spezifische initiale Verarbeitung #! TODO bleibt
+    # TODO: Weitere 'analysis_type's und deren spezifische initiale Verarbeitung
 
-    # Wenn kein spezifischer Verarbeitungsschritt definiert ist, geben wir die Rohdaten zurück (oder None, je nach Design) #! Zeile verschoben
-    if processed_data is None: #! Zeile verschoben
-         # Für analysis_types, die keine initiale Verarbeitung benötigen (z.B. API, die direkt saubere Daten liefert) #! Zeile verschoben
-         # Oder als Fallback, wenn der analysis_type unbekannt ist #! Zeile verschoben
-         processed_data = raw_data #! Zeile verschoben
+    # Wenn kein spezifischer Verarbeitungsschritt definiert ist, geben wir die Rohdaten zurück (oder None, je nach Design)
+    if processed_data is None:
+         # Für analysis_types, die keine initiale Verarbeitung benötigen (z.B. API, die direkt saubere Daten liefert)
+         # Oder als Fallback, wenn der analysis_type unbekannt ist
+         processed_data = raw_data
 
 
-    return processed_data #! Zeile verschoben
+    return processed_data
 
-# TODO: Funktion, die fetch_data_from_url und extract_text_from_html basierend auf Monitor-Konfiguration aufruft (Dieser TODO-Kommentar kann nun gelöscht werden, da process_monitor_data diese Rolle übernimmt.) #! Dieser TODO-Kommentar kann nun gelöscht werden
-# Note: Die Logging-Aufrufe (app.logger.error etc.) müssen angepasst werden, da app in diesem Modul nicht direkt verfügbar ist. Späteres TODO. #! Neuer Hinweis wegen Logging   
+
+# --- Endpunkt für n8n Trigger (Schritt 2.4) ---
+
+@monitor_api_bp.route('/monitors/trigger', methods=['POST']) #! Neue Route auf Blueprint (ohne /api)
+def trigger_monitor_processing():
+    """ #! Neuer Docstring
+    API Endpunkt, den n8n aufruft, um die Verarbeitung eines Monitors anzustoßen. #! Neuer Docstring
+    Erfordert API-Schlüssel-Authentifizierung. #! Neuer Docstring
+    Erwartet JSON im POST-Request: {"monitor_id": <id>} #! Neuer Docstring
+    Gibt Erfolgs- oder Fehlermeldung als JSON zurück. #! Neuer Docstring
+    """ #! Ende neuer Docstring
+    # API-Schlüssel Authentifizierung #! Neue Zeile
+    # Erwarte den API-Schlüssel im 'X-API-KEY' Header #! Neue Zeile
+    api_key_header = request.headers.get('X-API-KEY') #! Neue Zeile
+    expected_api_key = os.getenv('N8N_API_KEY') #! Neue Zeile
+
+    if not api_key_header or api_key_header != expected_api_key: #! Neue Zeile
+        # Gib 401 Unauthorized zurück, wenn der Schlüssel fehlt oder falsch ist #! Neue Zeile
+        return jsonify({"error": "Unauthorized: Invalid or missing API key"}), 401 #! Neue Zeile
+
+    # Hole die Monitor-ID aus dem Request Body #! Neue Zeile
+    data = request.get_json() #! Neue Zeile
+    if not data or 'monitor_id' not in data: #! Neue Zeile
+        # Gib 400 Bad Request zurück, wenn monitor_id fehlt #! Neue Zeile
+        return jsonify({"error": "Missing 'monitor_id' in request body"}), 400 #! Neue Zeile
+
+    monitor_id = data.get('monitor_id') #! Neue Zeile
+
+    # Hole den Monitor aus der Datenbank #! Neue Zeile
+    # WICHTIG: Für diesen Endpunkt, der von n8n (System) aufgerufen wird,
+    # prüfen wir NICHT, ob der Monitor zum aktuellen Benutzer gehört (da es keinen eingeloggten Benutzer gibt).
+    # n8n muss die Monitor-ID kennen und autorisiert sein, diesen Endpunkt aufzurufen (via API Key).
+    monitor = Monitor.query.get(monitor_id) #! Suche Monitor direkt nach ID
+
+    if not monitor: #! Neue Zeile
+        # Gib 404 Not Found zurück, wenn Monitor nicht existiert #! Neue Zeile
+        return jsonify({"error": f"Monitor with ID {monitor_id} not found"}), 404 #! Neue Zeile
+
+    # TODO: Optional prüfen, ob der Monitor aktiv ist (monitor.is_active) #! Neuer TODO
+
+    try: #! Neue Zeile
+        # Starte den Datenabruf- und Verarbeitungsprozess für diesen Monitor #! Neue Zeile
+        # Die process_monitor_data Funktion gibt die verarbeiteten Daten zurück #! Neue Zeile
+        processed_data = process_monitor_data(monitor) #! Neue Zeile
+
+        if processed_data is None: #! Neue Zeile
+             # process_monitor_data hat Fehler geloggt, falls etwas schiefging #! Neue Zeile
+             # Gib einen Fehler zurück, wenn die Verarbeitung fehlschlug #! Neue Zeile
+             return jsonify({"error": f"Failed to process data for monitor {monitor_id}"}), 500 # Interner Serverfehler #! Neue Zeile
+
+        # TODO: Rufe hier die AI-Analysefunktion auf (Phase 3) und verarbeite das Ergebnis #! Neuer TODO für AI
+
+        # TODO: Speichere Analyseergebnisse oder erstelle Benachrichtigung (später in Phase 3/4) #! Neuer TODO für Ergebnis/Benachrichtigung
+
+        # Gib eine Erfolgsmeldung und die verarbeiteten Daten zurück (oder nur eine Erfolgsmeldung) #! Neue Zeile
+        return jsonify({ #! Neue Zeile
+            "message": f"Processing triggered successfully for monitor {monitor_id}", #! Neue Zeile
+            "processed_data": processed_data # Gib die verarbeiteten Daten zurück (kann groß sein!) #! Neue Zeile
+        }), 200 # 200 OK #! Neue Zeile
+
+    except Exception as e: #! Neue Zeile
+        # Allgemeine Fehlerbehandlung während des Trigger-Prozesses #! Neue Zeile
+        # TODO: app.logger muss noch verfügbar gemacht werden oder hier anders loggen #! TODO anpassen wegen logging
+        # app.logger.error(f"Error processing trigger for monitor {monitor_id}: {e}")
+        return jsonify({"error": f"An error occurred during processing trigger for monitor {monitor_id}."}), 500 # Interner Serverfehler #! Neue Zeile
+#! Ende neuer Endpunkt
+
+
+# TODO: Note: Die Logging-Aufrufe (app.logger.error etc.) müssen angepasst werden, da app in diesem Modul nicht direkt verfügbar ist. Eine mögliche Lösung ist, das Logger-Objekt von app.py an die Funktionen zu übergeben oder eine separate Logging-Konfiguration zu verwenden. #! TODO bleibt
+
+# Startpunkt der Anwendung:
+# Dieser Block wird nur ausgeführt, wenn die Datei 'app.py' direkt
+# ausgeführt wird (z.B. mit 'python app.py'), nicht wenn sie als Modul importiert wird.
+# BEI VERWENDUNG VON FLASK RUN WIRD DIESER BLOCK NICHT AUSGEFÜHRT, ABER ER IST FÜR ALTERNATIVES STARTEN NÜTZLICH
+if __name__ == '__main__':
+    """
+    Datenbanktabellen erstellen im Anwendungs-Kontext:
+    Erstellt alle in models.py definierten Tabellen, falls sie noch nicht existieren.
+    Möglicherweise müssen Sie site.db löschen, wenn Sie das Schema manuell ändern
+    und keine Migrationen verwenden.
+    """
+    with app.app_context():
+        # db.create_all() liest nun die Modelle über die registrierten Blueprints und den db-Import aus models.py
+        db.create_all()
+
+    """
+    Flask Entwicklungsserver starten.
+    """
+    # app.run(debug=True) # Dieser Aufruf ist nicht notwendig, wenn Sie 'flask run' verwenden. Kann entfernt oder auskommentiert werden.
+    pass # Füge pass ein, da der Block leer sein könnte, wenn app.run auskommentiert ist
