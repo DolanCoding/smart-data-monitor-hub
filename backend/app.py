@@ -1,10 +1,11 @@
 # backend/app.py: Hauptdatei für das SDMN Flask Backend
 # Enthält grundlegende App-Konfiguration, Datenbank-Setup, Flask-Login
 # und Routen für die Authentifizierung und Monitor-API.
+# Modelldefinitionen sind in models.py.
 # Enthält Logik zum Abrufen und initialen Verarbeiten von Daten.
 
 from flask import Flask, render_template, url_for, redirect, request, flash, jsonify
-from flask_sqlalchemy import SQLAlchemy
+from flask_sqlalchemy import SQLAlchemy #! SQLAlchemy Import bleibt hier
 from flask_login import LoginManager, UserMixin, login_user, logout_user, current_user, login_required
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime
@@ -14,8 +15,10 @@ from dotenv import load_dotenv
 import requests
 from bs4 import BeautifulSoup
 
-# Imports für die Modelle aus der lokalen models.py Datei
-from .models import db, User, Monitor # Importiere db und die Modelle
+# Importiere das db-Objekt aus der __init__.py im selben Paket
+from . import db #! Importiere db aus der __init__.py
+# Importiere die Modelle aus models.py
+from .models import User, Monitor #! Importiere User und Monitor aus models.py
 
 # basedir holt das Verzeichnis der aktuellen Datei (__file__).
 # Dies ist nützlich, um Pfade relativ zur App-Datei anzugeben.

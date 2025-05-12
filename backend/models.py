@@ -1,6 +1,6 @@
 # backend/models.py: Definitionen der Datenbankmodelle
 
-from .app import db # Importiere das db-Objekt aus app.py
+from . import db #! Importiere db aus der __init__.py
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
